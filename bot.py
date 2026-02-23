@@ -93,14 +93,19 @@ async def main():
     # Tạo client — dùng StringSession nếu có (Railway), không thì dùng file session (local)
     if SESSION_STRING:
         client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
-        log.info("🔑 Sử dụng StringSession (Railway mode)")
+        log.info("Su dung StringSession (Railway mode)")
     else:
         client = TelegramClient("mirror_bot_session", API_ID, API_HASH)
-        log.info("📁 Sử dụng file session (local mode)")
+        log.info("Su dung file session (local mode)")
     await client.start()
 
     me = await client.get_me()
-    log.info(f"✅ Đã đăng nhập: {me.first_name} (@{me.username})")
+    log.info(f"Da dang nhap: {me.first_name} (@{me.username})")
+
+    # Tải danh sách chat để populate entity cache (cần cho StringSession)
+    log.info("Dang tai danh sach chat...")
+    await client.get_dialogs()
+    log.info("Da tai xong danh sach chat.")
 
     source = parse_group_id(SOURCE_GROUP)
     mirror = parse_group_id(MIRROR_GROUP)
@@ -108,19 +113,19 @@ async def main():
     # Kiểm tra kết nối tới các group
     try:
         source_entity = await client.get_entity(source)
-        log.info(f"📥 Group nguồn: {getattr(source_entity, 'title', source)}")
+        log.info(f"Group nguon: {getattr(source_entity, 'title', source)}")
     except Exception as e:
-        log.error(f"❌ Không thể kết nối group nguồn: {e}")
+        log.error(f"Khong the ket noi group nguon: {e}")
         raise SystemExit(1)
 
     try:
         mirror_entity = await client.get_entity(mirror)
-        log.info(f"📤 Group mirror: {getattr(mirror_entity, 'title', mirror)}")
+        log.info(f"Group mirror: {getattr(mirror_entity, 'title', mirror)}")
     except Exception as e:
-        log.error(f"❌ Không thể kết nối group mirror: {e}")
+        log.error(f"Khong the ket noi group mirror: {e}")
         raise SystemExit(1)
 
-    log.info("🚀 Bot đang chạy... Đang lắng nghe tin nhắn mới.")
+    log.info("Bot dang chay... Dang lang nghe tin nhan moi.")
 
     @client.on(events.NewMessage(chats=source_entity))
     async def handler(event):
@@ -154,7 +159,7 @@ async def main():
             translated = ""
 
         # Format tin nhắn mirror
-        mirror_text = f"👤 **{sender_name}**:\n{translated}" if translated else f"👤 **{sender_name}**: [media]"
+        mirror_text = f"**{sender_name}**:\n{translated}" if translated else f"**{sender_name}**: [media]"
 
         try:
             if msg.media:
@@ -172,9 +177,9 @@ async def main():
                     mirror_text,
                     parse_mode="md",
                 )
-            log.info(f"📨 Đã mirror: {sender_name}: {original_text[:50]}...")
+            log.info(f"Da mirror: {sender_name}: {original_text[:50]}...")
         except Exception as e:
-            log.error(f"❌ Lỗi gửi tin nhắn mirror: {e}")
+            log.error(f"Loi gui tin nhan mirror: {e}")
 
     # Giữ bot chạy liên tục
     await client.run_until_disconnected()

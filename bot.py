@@ -80,13 +80,49 @@ async def translate_message(text: str) -> str:
         log.error(f"Lỗi dịch: {e}")
         return f"[Lỗi dịch] {text}"
 
-# ─── Parse group ID ─────────────────────────────────────────
-def parse_group_id(group_str: str):
-    """Chuyển đổi string group thành ID hoặc username."""
+# ─── Resolve group entity ────────────────────────────────────
+async def resolve_group(client, group_str: str, label: str):
+    """Resolve group from ID, username, or group title via dialogs."""
+    # Try as numeric ID first
+    group_id = None
     try:
-        return int(group_str)
+        group_id = int(group_str)
     except ValueError:
-        return group_str
+        pass
+
+    # Search in dialogs (most reliable method)
+    async for dialog in client.iter_dialogs():
+        entity = dialog.entity
+        eid = entity.id
+
+        # Match by full ID (e.g. -1005265504221)
+        if group_id is not None:
+            if eid == group_id or eid == abs(group_id):
+                log.info(f"{label}: {dialog.title} (ID: {eid})")
+                return entity
+            # Handle -100 prefix: -1005265504221 -> 5265504221
+            stripped = str(abs(group_id))
+            if stripped.startswith("100") and str(eid) == stripped[3:]:
+                log.info(f"{label}: {dialog.title} (ID: {eid})")
+                return entity
+
+        # Match by title
+        if group_str and dialog.title and dialog.title.lower() == group_str.lower():
+            log.info(f"{label}: {dialog.title} (matched by title)")
+            return entity
+
+    # If not found in dialogs, try direct get_entity
+    if group_id is not None:
+        try:
+            entity = await client.get_entity(group_id)
+            log.info(f"{label}: {getattr(entity, 'title', group_str)}")
+            return entity
+        except Exception:
+            pass
+
+    log.error(f"Khong the tim thay {label}: {group_str}")
+    log.error("Thu doi MIRROR_GROUP thanh ten group (VD: dich fx)")
+    raise SystemExit(1)
 
 # ─── Main bot ───────────────────────────────────────────────
 async def main():
@@ -107,23 +143,8 @@ async def main():
     await client.get_dialogs()
     log.info("Da tai xong danh sach chat.")
 
-    source = parse_group_id(SOURCE_GROUP)
-    mirror = parse_group_id(MIRROR_GROUP)
-
-    # Kiểm tra kết nối tới các group
-    try:
-        source_entity = await client.get_entity(source)
-        log.info(f"Group nguon: {getattr(source_entity, 'title', source)}")
-    except Exception as e:
-        log.error(f"Khong the ket noi group nguon: {e}")
-        raise SystemExit(1)
-
-    try:
-        mirror_entity = await client.get_entity(mirror)
-        log.info(f"Group mirror: {getattr(mirror_entity, 'title', mirror)}")
-    except Exception as e:
-        log.error(f"Khong the ket noi group mirror: {e}")
-        raise SystemExit(1)
+    source_entity = await resolve_group(client, SOURCE_GROUP, "Group nguon")
+    mirror_entity = await resolve_group(client, MIRROR_GROUP, "Group mirror")
 
     log.info("Bot dang chay... Dang lang nghe tin nhan moi.")
 

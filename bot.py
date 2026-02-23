@@ -47,38 +47,51 @@ validate_config()
 
 # ─── Gemini setup ────────────────────────────────────────────
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-2.0-flash")
+model = genai.GenerativeModel("gemini-2.0-flash-lite")
 
-TRANSLATE_PROMPT = """Bạn là một dịch giả chuyên ngành trading forex/vàng/crypto.
-Dịch tin nhắn sau sang tiếng Việt.
+TRANSLATE_PROMPT = """Ban la mot dich gia chuyen nganh trading forex/vang/crypto.
+Dich tin nhan sau sang tieng Viet.
 
-Quy tắc:
-- Dịch tự nhiên, dễ hiểu
-- Giữ nguyên các con số, không thêm bớt
-- Giữ nguyên các thuật ngữ phổ biến nếu cần (SL, TP, pips, entry...)
-- Sửa lỗi chính tả trong bản gốc nếu có (VD: "bais" = "bias", "entery" = "entry")
-- CHỈ trả về bản dịch, KHÔNG giải thích thêm gì
-- Nếu tin nhắn đã là tiếng Việt hoặc chỉ là số/ký hiệu, giữ nguyên
+Quy tac:
+- Dich tu nhien, de hieu
+- Giu nguyen cac con so, khong them bot
+- Giu nguyen cac thuat ngu pho bien neu can (SL, TP, pips, entry...)
+- Sua loi chinh ta trong ban goc neu co (VD: "bais" = "bias", "entery" = "entry")
+- CHI tra ve ban dich, KHONG giai thich them gi
+- Neu tin nhan da la tieng Viet hoac chi la so/ky hieu, giu nguyen
 
-Tin nhắn:
+Tin nhan:
 {message}"""
 
 # ─── Translation function ───────────────────────────────────
+MAX_RETRIES = 3
+RETRY_DELAY = 30  # seconds
+
 async def translate_message(text: str) -> str:
-    """Dịch tin nhắn bằng Gemini API."""
+    """Dich tin nhan bang Gemini API voi retry."""
     if not text or not text.strip():
         return text
 
-    try:
-        prompt = TRANSLATE_PROMPT.format(message=text)
-        response = await asyncio.to_thread(
-            model.generate_content, prompt
-        )
-        translated = response.text.strip()
-        return translated if translated else text
-    except Exception as e:
-        log.error(f"Lỗi dịch: {e}")
-        return f"[Lỗi dịch] {text}"
+    for attempt in range(MAX_RETRIES):
+        try:
+            prompt = TRANSLATE_PROMPT.format(message=text)
+            response = await asyncio.to_thread(
+                model.generate_content, prompt
+            )
+            translated = response.text.strip()
+            return translated if translated else text
+        except Exception as e:
+            error_str = str(e)
+            if "429" in error_str or "quota" in error_str.lower():
+                wait_time = RETRY_DELAY * (attempt + 1)
+                log.warning(f"Rate limited, retry {attempt+1}/{MAX_RETRIES} sau {wait_time}s...")
+                await asyncio.sleep(wait_time)
+            else:
+                log.error(f"Loi dich: {e}")
+                return f"[LOI DICH] {text}"
+
+    log.error("Het so lan retry, gui ban goc")
+    return f"[CHUA DICH] {text}"
 
 # ─── Resolve group entity ────────────────────────────────────
 async def resolve_group(client, group_str: str, label: str):

@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 import google.generativeai as genai
-from deep_translator import GoogleTranslator
 
 # ─── Load config ────────────────────────────────────────────
 load_dotenv()
@@ -65,50 +64,34 @@ Tin nhan:
 {message}"""
 
 # ─── Translation function ───────────────────────────────────
-MAX_RETRIES = 2
-RETRY_DELAY = 15  # seconds
-
-async def translate_with_gemini(text: str) -> str:
-    """Dich bang Gemini API (context-aware)."""
-    prompt = TRANSLATE_PROMPT.format(message=text)
-    response = await asyncio.to_thread(
-        model.generate_content, prompt
-    )
-    translated = response.text.strip()
-    return translated if translated else text
-
-async def translate_with_google(text: str) -> str:
-    """Dich bang Google Translate (free, fallback)."""
-    translated = await asyncio.to_thread(
-        GoogleTranslator(source='auto', target='vi').translate, text
-    )
-    return translated if translated else text
+MAX_RETRIES = 3
+RETRY_DELAY = 10  # seconds
 
 async def translate_message(text: str) -> str:
-    """Dich tin nhan: thu Gemini truoc, fallback sang Google Translate."""
+    """Dich tin nhan bang Gemini API."""
     if not text or not text.strip():
         return text
 
-    # Thu Gemini truoc (dich tot hon voi trading context)
     for attempt in range(MAX_RETRIES):
         try:
-            return await translate_with_gemini(text)
+            prompt = TRANSLATE_PROMPT.format(message=text)
+            response = await asyncio.to_thread(
+                model.generate_content, prompt
+            )
+            translated = response.text.strip()
+            return translated if translated else text
         except Exception as e:
             error_str = str(e)
             if "429" in error_str or "quota" in error_str.lower():
-                log.warning(f"Gemini rate limited, retry {attempt+1}/{MAX_RETRIES}...")
-                await asyncio.sleep(RETRY_DELAY)
+                wait_time = RETRY_DELAY * (attempt + 1)
+                log.warning(f"Gemini rate limited, doi {wait_time}s... ({attempt+1}/{MAX_RETRIES})")
+                await asyncio.sleep(wait_time)
             else:
-                log.warning(f"Gemini loi: {e}")
-                break
+                log.error(f"Gemini loi: {e}")
+                return text
 
-    # Fallback sang Google Translate
-    try:
-        log.info("Dung Google Translate fallback...")
-        return await translate_with_google(text)
-    except Exception as e:
-        log.error(f"Google Translate cung loi: {e}")
-        return text  # Tra ve ban goc, khong them prefix
+    log.error("Gemini het quota, gui ban goc")
+    return text
 
 # ─── Resolve group entity ────────────────────────────────────
 async def resolve_group(client, group_str: str, label: str):

@@ -4,14 +4,14 @@ import asyncio
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-import google.generativeai as genai
+from groq import Groq
 
 # ─── Load config ────────────────────────────────────────────
 load_dotenv()
 
 API_ID = int(os.getenv("API_ID", "0"))
 API_HASH = os.getenv("API_HASH", "")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 SESSION_STRING = os.getenv("SESSION_STRING", "")
 SOURCE_GROUP = os.getenv("SOURCE_GROUP", "")
 MIRROR_GROUP = os.getenv("MIRROR_GROUP", "")
@@ -32,8 +32,8 @@ def validate_config():
         missing.append("API_ID")
     if not API_HASH:
         missing.append("API_HASH")
-    if not GEMINI_API_KEY:
-        missing.append("GEMINI_API_KEY")
+    if not GROQ_API_KEY:
+        missing.append("GROQ_API_KEY")
     if not SOURCE_GROUP:
         missing.append("SOURCE_GROUP")
     if not MIRROR_GROUP:
@@ -45,52 +45,54 @@ def validate_config():
 
 validate_config()
 
-# ─── Gemini setup ────────────────────────────────────────────
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-2.0-flash-lite")
+# ─── Groq setup ──────────────────────────────────────────────
+client_groq = Groq(api_key=GROQ_API_KEY)
 
-TRANSLATE_PROMPT = """Ban la mot dich gia chuyen nganh trading forex/vang/crypto.
-Dich tin nhan sau sang tieng Viet.
+SYSTEM_PROMPT = """Ban la mot dich gia chuyen nganh trading forex/vang/crypto.
+Dich tin nhan sang tieng Viet.
 
 Quy tac:
 - Dich tu nhien, de hieu
 - Giu nguyen cac con so, khong them bot
-- Giu nguyen cac thuat ngu pho bien neu can (SL, TP, pips, entry...)
-- Sua loi chinh ta trong ban goc neu co (VD: "bais" = "bias", "entery" = "entry")
+- Giu nguyen thuat ngu pho bien (SL, TP, pips, entry...)
+- Sua loi chinh ta neu co (bais=bias, entery=entry, los=low)
 - CHI tra ve ban dich, KHONG giai thich them gi
-- Neu tin nhan da la tieng Viet hoac chi la so/ky hieu, giu nguyen
-
-Tin nhan:
-{message}"""
+- Neu da la tieng Viet hoac chi la so/ky hieu, giu nguyen"""
 
 # ─── Translation function ───────────────────────────────────
 MAX_RETRIES = 3
-RETRY_DELAY = 10  # seconds
+RETRY_DELAY = 5  # seconds
 
 async def translate_message(text: str) -> str:
-    """Dich tin nhan bang Gemini API."""
+    """Dich tin nhan bang Groq API (LLaMA 3)."""
     if not text or not text.strip():
         return text
 
     for attempt in range(MAX_RETRIES):
         try:
-            prompt = TRANSLATE_PROMPT.format(message=text)
             response = await asyncio.to_thread(
-                model.generate_content, prompt
+                client_groq.chat.completions.create,
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": text}
+                ],
+                temperature=0.3,
+                max_tokens=500,
             )
-            translated = response.text.strip()
+            translated = response.choices[0].message.content.strip()
             return translated if translated else text
         except Exception as e:
             error_str = str(e)
-            if "429" in error_str or "quota" in error_str.lower():
+            if "429" in error_str or "rate" in error_str.lower():
                 wait_time = RETRY_DELAY * (attempt + 1)
-                log.warning(f"Gemini rate limited, doi {wait_time}s... ({attempt+1}/{MAX_RETRIES})")
+                log.warning(f"Groq rate limited, doi {wait_time}s... ({attempt+1}/{MAX_RETRIES})")
                 await asyncio.sleep(wait_time)
             else:
-                log.error(f"Gemini loi: {e}")
+                log.error(f"Groq loi: {e}")
                 return text
 
-    log.error("Gemini het quota, gui ban goc")
+    log.error("Groq het quota, gui ban goc")
     return text
 
 # ─── Resolve group entity ────────────────────────────────────
